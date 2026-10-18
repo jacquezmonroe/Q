@@ -1,5 +1,5 @@
 // Tests for approved memories: the "remember" matcher, the read-back and the prompt block. Run: node scripts/test-memory.mjs
-import { parseRemember, readBack, memoryBlock, cleanMemory, aboutHim, MAX_MEMORY_CHARS } from '../memory.js';
+import { parseRemember, readBack, memoryBlock, cleanMemory, aboutHim, createSuggestionFilter, offerable, answerTo, MAX_MEMORY_CHARS } from '../memory.js';
 
 let failed = 0;
 const check = (name, ok, detail = '') => { console.log(`  ${ok ? '✓' : '✕'} ${name}${ok || !detail ? '' : ` — ${detail}`}`); if (!ok) failed++; };
@@ -71,6 +71,34 @@ console.log('tidying');
 check('trims, collapses spaces, capitalises, drops end punctuation', cleanMemory('  my   dog is   called Rex.  ').text === 'My dog is called Rex');
 check('refuses empty', cleanMemory('  ').error === 'empty' && cleanMemory(null).error === 'empty');
 check(`refuses over ${MAX_MEMORY_CHARS} characters`, cleanMemory('x'.repeat(MAX_MEMORY_CHARS + 1)).error === 'too-long' && cleanMemory('x'.repeat(MAX_MEMORY_CHARS)).text.length === MAX_MEMORY_CHARS);
+
+console.log('Q suggesting a memory');
+const tidy = (t) => t.replace(/\s+/g, ' ').trim(); // spare spaces around removed text are harmless in speech
+const stream = (parts) => { const f = createSuggestionFilter(); const shown = parts.map((t) => f.push(t)); const rest = f.end(); return { early: shown, text: tidy(shown.join('') + rest), question: f.question() }; };
+let r = stream(['Rex is a solid', ' name. Want me', ' to remember', ' that?']);
+check('holds back a closing "want me to remember that?" and hands it over separately', r.text === 'Rex is a solid name.' && r.question === 'Want me to remember that?', JSON.stringify(r));
+check('nothing of the question gets out early, even in pieces', r.early.join('').trim() === 'Rex is a solid name.', JSON.stringify(r.early));
+for (const q of ['Should I remember that?', 'Do you want me to keep that?', 'Would you like me to save this?', 'want me to remember that for you?']) check(`recognises "${q}"`, stream([`Nice. ${q}`]).question === q);
+r = stream(['Want me to explain more?']);
+check('other "want me to …" questions are let through', r.text === 'Want me to explain more?' && r.question === '', JSON.stringify(r));
+r = stream(['Want me to remember that? Miso is a great name.']);
+check('a question in the middle is just text', r.text === 'Want me to remember that? Miso is a great name.' && r.question === '');
+check('a remember tag the model writes anyway is removed', stream(['Sure. [[remember: your dog is Rex]]']).text === 'Sure.' && stream(['Big change. [remember: you are moving].']).text === 'Big change.' && stream(['Sure. [[remember: your dog']).text === 'Sure.');
+check('ordinary brackets are left alone', stream(['A list [1] and ', 'more [2].']).text === 'A list [1] and more [2].');
+check('a normal reply passes untouched', stream(['Just ', 'a reply.']).text === 'Just a reply.');
+
+console.log('what can be offered');
+const offer = {
+  "My dog's name is Rex.": "My dog's name is Rex",
+  "I'm moving to Atlanta in May.": "I'm moving to Atlanta in May",
+  'Q, I work at a bakery on weekends': 'I work at a bakery on weekends',
+  "I'm tired today.": null, 'I am so hungry right now': null, "What's the capital of Nigeria?": null,
+  'yes': null, 'Remember that I like tea': null, 'Hi': null, 'Ok cool': null, ['x '.repeat(80)]: null,
+};
+for (const [said, want] of Object.entries(offer)) check(`"${said.slice(0, 40)}" → ${want === null ? 'not offered' : `"${want}"`}`, offerable(said) === want, `got ${JSON.stringify(offerable(said))}`);
+
+const yesNo = { 'yes': true, 'Yeah.': true, 'Q, yes please': true, 'sure!': true, 'do it': true, 'go ahead': true, 'save it': true, 'no': false, 'Nah.': false, 'no thanks': false, "don't": false, 'never mind': false, 'yes but what about Ada': null, 'maybe': null, 'What time is it?': null, '': null };
+for (const [said, want] of Object.entries(yesNo)) check(`"${said}" answers ${want === null ? 'nothing' : want ? 'yes' : 'no'}`, answerTo(said) === want, `got ${answerTo(said)}`);
 
 if (failed) { console.log(`\n${failed} case(s) failed\n`); process.exit(1); }
 console.log('\nall passed\n');

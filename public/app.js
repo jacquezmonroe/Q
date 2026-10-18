@@ -7,7 +7,7 @@ import { SCHEMA, MAX_RUNS, MIN_FOR_P90, IDLE_MS, kindOf, sameWords, summarize, b
 
 // What this page needs from the server (server.js API_LEVEL). A server started
 // before an update keeps serving new pages until it is restarted.
-const NEEDS_API = 8;
+const NEEDS_API = 9;
 
 const $ = (sel) => document.querySelector(sel);
 const els = {
@@ -578,6 +578,7 @@ async function sampleSystem(t) {
 
 async function runTurn(text) {
   const t = turn;
+  closeSuggestion(); // this turn answers or lets go of any open suggestion
   S.messages.push({ role: 'user', content: text, at: Date.now() });
   t.userPushed = true;
   showCaption({ heard: text, said: '', note: '' });
@@ -625,6 +626,8 @@ async function runTurn(text) {
           cut.chunks.forEach(speakSentence);
         } else if (msg.type === 'memory') {
           memorySaved(msg.memory);
+        } else if (msg.type === 'suggestion') {
+          memorySuggested(msg.text);
         } else if (msg.type === 'done') {
           t.stats = msg.stats;
         } else if (msg.type === 'error') {
@@ -789,6 +792,43 @@ function memorySaved(m) {
   el.appendChild(undo);
   els.log.appendChild(el);
   els.log.scrollTop = els.log.scrollHeight;
+}
+
+// Q suggested keeping something. He can answer by voice ("yes", "no") or here.
+// Any other turn lets it go, so the buttons go away when the next turn starts.
+let openSuggestion = null;
+function memorySuggested(text) {
+  closeSuggestion();
+  els.empty.hidden = true;
+  const el = document.createElement('div');
+  el.className = 'note';
+  el.append(`Q suggests remembering: ${text}`);
+  const conv = S.conv;
+  const buttons = ['Save', 'No'].map((label) => {
+    const b = document.createElement('button');
+    b.type = 'button'; b.className = 'ghost undo'; b.textContent = label;
+    b.addEventListener('click', async () => {
+      buttons.forEach((x) => { x.disabled = true; });
+      try {
+        const r = await fetch('/api/memories/suggestion', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ conv, accept: label === 'Save' }) });
+        const out = await r.json();
+        renderMemories(out);
+        el.textContent = out.reply;
+        if (out.memory) memorySaved(out.memory);
+      } catch (err) { el.textContent = `Couldn’t answer that: ${err.message}`; }
+      openSuggestion = null;
+    });
+    return b;
+  });
+  el.append(...buttons);
+  openSuggestion = el;
+  els.log.appendChild(el);
+  els.log.scrollTop = els.log.scrollHeight;
+}
+function closeSuggestion() {
+  if (!openSuggestion) return;
+  openSuggestion.querySelectorAll('button').forEach((b) => b.remove());
+  openSuggestion = null;
 }
 
 els.memAdd.addEventListener('submit', async (e) => {

@@ -92,3 +92,78 @@ export function cleanMemory(text) {
   if (t.length > MAX_MEMORY_CHARS) return { error: 'too-long' };
   return { text: t.charAt(0).toUpperCase() + t.slice(1) };
 }
+
+// ---------- Q suggesting a memory (step 3b) ----------
+// Q may end a reply with "Want me to remember that?". Code, not the model,
+// decides whether to offer anything: the fact offered is what he just said, in
+// his own words. Because the reply is spoken while it streams, the server
+// holds such a closing question back until the reply is complete; it is only
+// let through when there is something to offer, so a "yes" never lands on
+// nothing. Any "[[remember: …]]" tag the model writes anyway is removed, never
+// spoken. (A first design asked the model for that tag; in tests it dropped or
+// garbled it most of the time, 2026-10-18.)
+const ASK_START = /^(do you want me to|would you like me to|want me to|should i|shall i)\b/i;
+const ASK_WHOLE = /^(do you want me to|would you like me to|want me to|should i|shall i)\s+(remember|keep|save|note)\s+(that|this|it)(\s+for you)?\s*\?\s*$/i;
+const TAG = /\[\[?\s*remember\s*:[^\]]*\]\]?\.?/gi;
+
+export function createSuggestionFilter() {
+  let held = '';
+  let question = '';
+  // Where the unfinished end of the text starts, if it might be the question or a tag.
+  const holdFrom = (t) => {
+    let at = -1;
+    for (let i = 0; i < t.length; i++) if (t[i] === '[') { at = i; break; }
+    const starts = [0, ...[...t.matchAll(/[.!?]["”')]*\s+/g)].map((m) => m.index + m[0].length)];
+    for (const st of starts) {
+      if (at !== -1 && st >= at) break;
+      const rest = t.slice(st).trimStart().toLowerCase();
+      if (!rest) continue;
+      const done = /[.!?]["”')]*\s*$/.test(rest);
+      if ((!done && ('do you want me to'.startsWith(rest) || 'would you like me to'.startsWith(rest) || 'want me to'.startsWith(rest) || 'should i'.startsWith(rest) || 'shall i'.startsWith(rest) || ASK_START.test(rest))) || (done && ASK_WHOLE.test(rest))) {
+        if (at === -1 || st < at) at = st;
+        break;
+      }
+    }
+    return at;
+  };
+  const release = () => {
+    held = held.replace(TAG, '');
+    const at = holdFrom(held);
+    if (at === -1) { const out = held; held = ''; return out; }
+    const out = held.slice(0, at); held = held.slice(at); return out;
+  };
+  return {
+    push(text) { held += text; return release(); },
+    // Ends the reply. Returns what is left to show; the closing question, if
+    // there is one, is kept apart for the caller to let through or drop.
+    end() {
+      held = held.replace(TAG, '');
+      const tail = held.trim();
+      if (ASK_WHOLE.test(tail)) { question = tail; held = ''; return ''; }
+      const out = held.replace(/\[\[?\s*(r[a-z]*\s*:?[^\]]*)?$/i, ''); // an unfinished tag is dropped
+      held = '';
+      return out;
+    },
+    question: () => question,
+  };
+}
+
+// Can what he just said be offered as a memory? Returns it, tidied, or null.
+// Questions, commands, answers and passing states ("I'm tired today") are not.
+const PASSING = /\b(today|tonight|right now|this morning|this afternoon|this evening|at the moment|currently|rn|just now)\b/i;
+export function offerable(text) {
+  if (typeof text !== 'string') return null;
+  const s = text.trim().replace(LEAD, '');
+  if (!s || /\?\s*$/.test(s) || PASSING.test(s) || answerTo(s) !== null || parseRemember(s)) return null;
+  const c = cleanMemory(s);
+  if (c.error || c.text.split(' ').length < 3) return null;
+  return c.text;
+}
+
+// His answer to a suggestion, said or typed: true for yes, false for no, null for neither.
+export function answerTo(text) {
+  const s = String(text ?? '').trim().replace(LEAD, '').replace(/[.!,\s]+$/, '').toLowerCase();
+  if (/^(yes|yeah|yep|yup|ya|sure|ok|okay|do it|please|please do|go ahead|yes please|sounds good|save it|remember it|yes remember it|absolutely|definitely)$/.test(s)) return true;
+  if (/^(no|nope|nah|no thanks|no thank you|don't|do not|skip it|never mind|nevermind|not now|don't save it|forget it)$/.test(s)) return false;
+  return null;
+}

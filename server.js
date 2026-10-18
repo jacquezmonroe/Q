@@ -14,7 +14,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createEchoFilter } from './echo.js';
 import { openHistory } from './history.js';
-import { parseRemember, readBack, memoryBlock, MAX_MEMORIES, MAX_MEMORY_CHARS } from './memory.js';
+import { parseRemember, readBack, memoryBlock, createSuggestionFilter, offerable, answerTo, MAX_MEMORIES, MAX_MEMORY_CHARS } from './memory.js';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(ROOT, 'public');
@@ -57,7 +57,7 @@ const DEFAULTS = {
 const CONFIG = await loadConfig();
 // Raised whenever the page starts needing something new from the server, so a
 // page served by a server that hasn't been restarted can say so.
-const API_LEVEL = 8;
+const API_LEVEL = 9;
 const VERSION = await readFile(path.join(ROOT, 'package.json'), 'utf8').then((t) => JSON.parse(t).version).catch(() => null);
 let stopping = false;
 
@@ -605,6 +605,54 @@ function afterMemoryChange() {
   setTimeout(() => { if (!activeChats) warmModel().catch(() => {}); }, 50);
 }
 
+// Q's suggestions waiting for his yes or no, by conversation (step 3b). A
+// suggestion is only ever saved when he answers yes, by voice or button. It is
+// let go by any other turn, and after ten minutes.
+const pendingSuggestion = new Map(); // conv → { said, fact, at }
+const lastSuggestedAt = new Map(); // conv → how many of his turns there were when Q last suggested
+const SUGGEST_EVERY = 5; // turns between suggestions, so Q doesn't nag
+const SUGGESTION_TTL = 10 * 60_000;
+
+// He answered a pending suggestion: save it or let it go, in a fixed line, without the model.
+function answerSuggestion(conv, accept) {
+  const p = pendingSuggestion.get(conv);
+  pendingSuggestion.delete(conv);
+  if (!p || Date.now() - p.at > SUGGESTION_TTL) return { reply: 'That one has gone, so I didn’t save anything. Say “remember that …” if you want it kept.' };
+  if (!accept) return { reply: 'No problem, I won’t keep it.' };
+  const r = saved.addMemory(p.fact, 'suggested');
+  if (r.error === 'duplicate') return { reply: `I already have that one: ${readBack(r.memory.text)}.` };
+  if (r.error === 'full') return { reply: `My memory's full, so I couldn't save it. Delete one in the panel first.` };
+  if (r.error) return { reply: 'I couldn’t save that one.' };
+  afterMemoryChange();
+  return { reply: `Saved. I'll remember: ${readBack(r.memory.text)}.`, memory: r.memory };
+}
+
+// A fixed reply instead of the model's (remembering, answering a suggestion).
+function fixedTurn(req, res, send, conv, asked, reply, memory) {
+  send({ type: 'token', text: reply });
+  if (memory) send({ type: 'memory', memory: { id: memory.id, text: memory.text } });
+  send({ type: 'done', stats: { memoryCommand: true } });
+  if (fromOwnPage(req)) { try { saved.record(conv, asked, reply); } catch (err) { console.warn('[q] could not save the turn:', err.message); } }
+  res.end();
+}
+
+// Q's reply ended with "want me to remember that?": decide whether there is
+// something to offer. The fact is what he just said, in his words. Nothing is
+// offered (and the question is dropped) unless that reads as a lasting fact,
+// isn't kept already, there's room, and Q hasn't asked in the last few turns.
+function suggestionFor(req, conv, valid) {
+  if (!fromOwnPage(req) || typeof conv !== 'string') return null;
+  const asked = valid[valid.length - 1];
+  const fact = asked?.role === 'user' ? offerable(asked.content) : null;
+  if (!fact) return null;
+  const all = saved.memories();
+  if (all.length >= MAX_MEMORIES || all.some((m) => m.text.toLowerCase() === fact.toLowerCase())) return null;
+  const turns = valid.filter((m) => m.role === 'user').length;
+  if (lastSuggestedAt.has(conv) && turns - lastSuggestedAt.get(conv) < SUGGEST_EVERY) return null;
+  lastSuggestedAt.set(conv, turns);
+  return { fact, said: readBack(fact) };
+}
+
 // "Remember that …" is handled in plain code, never by the model (D-042): the
 // fact is saved, Q reads it back in a fixed line so a mishearing shows, and the
 // page offers Undo. The exchange is saved to the conversation like any other.
@@ -687,6 +735,21 @@ async function streamChatInner(req, res) {
   const askedNow = valid[valid.length - 1];
   const fact = !bench && askedNow?.role === 'user' ? parseRemember(askedNow.content) : null;
   if (fact) return rememberTurn(req, res, send, body.conv, askedNow.content, fact);
+  // A plain yes or no right after Q suggested a memory answers the suggestion.
+  const answer = !bench && askedNow?.role === 'user' ? answerTo(askedNow.content) : null;
+  if (pendingSuggestion.has(body.conv)) {
+    if (answer !== null && fromOwnPage(req)) {
+      const r = answerSuggestion(body.conv, answer);
+      return fixedTurn(req, res, send, body.conv, askedNow.content, r.reply, r.memory);
+    }
+    pendingSuggestion.delete(body.conv); // he moved on
+  }
+  // Q asked "want me to remember that?" without a usable suggestion behind it:
+  // a yes must not let the model pretend it saved something.
+  const before = valid[valid.length - 2];
+  if (answer === true && before?.role === 'assistant' && /remember (that|it|this)\??\s*$/i.test(before.content.trim())) {
+    return fixedTurn(req, res, send, body.conv, askedNow.content, 'I didn’t catch exactly what to keep there. Say “remember that …” and I’ll save it.');
+  }
 
   // A turn that arrives during the warm-up waits for it here, so the wait is
   // measured instead of hiding inside Ollama's queue.
@@ -702,6 +765,7 @@ async function streamChatInner(req, res) {
   const started = performance.now();
   let firstTokenMs = null;
   const echo = createEchoFilter(); // drops a timestamp the model copies back at the start
+  const tags = createSuggestionFilter(); // holds back a closing "want me to remember that?" until it's clear there's something to offer
   let said = ''; // the reply as the page received it, kept only so keep-warm can replay this turn
   try {
     const upstream = await fetch(`${CONFIG.ollamaUrl}/api/chat`, {
@@ -731,12 +795,22 @@ async function streamChatInner(req, res) {
         const text = msg.message?.content || '';
         if (text) {
           if (firstTokenMs == null) firstTokenMs = performance.now() - started;
-          const out = echo.push(text);
+          const out = tags.push(echo.push(text));
           if (out) { said += out; send({ type: 'token', text: out }); }
         }
         if (msg.done) {
-          const held = echo.end();
+          const held = tags.push(echo.end()) + tags.end();
           if (held) { said += held; send({ type: 'token', text: held }); }
+          // The closing "want me to remember that?" is only heard if there's something to offer.
+          const ask = tags.question();
+          const offer = ask && !bench ? suggestionFor(req, body.conv, valid) : null;
+          if (offer) {
+            const text = `${said && !/\s$/.test(said) ? ' ' : ''}${ask}`;
+            said += text;
+            send({ type: 'token', text });
+            pendingSuggestion.set(body.conv, { said: offer.said, fact: offer.fact, at: Date.now() });
+            send({ type: 'suggestion', text: offer.said });
+          }
           lastModelUse = Date.now();
           if (!bench) {
             // Save the finished exchange (history.js decides whether saving is on).
@@ -1054,6 +1128,10 @@ const server = http.createServer(async (req, res) => {
       else if (pathname === '/api/memories/update') r = saved.updateMemory(Number(body.id), body.text);
       else if (pathname === '/api/memories/delete') r = { removed: body.all === true ? saved.clearMemories() : saved.removeMemory(Number(body.id)) };
       else if (pathname === '/api/memories/settings') saved.setSettings({ useMemories: body.use });
+      else if (pathname === '/api/memories/suggestion') {
+        const a = answerSuggestion(String(body.conv || ''), body.accept === true);
+        return json(res, 200, { reply: a.reply, memory: a.memory || null, ...state() });
+      }
       else return json(res, 404, { error: 'not found' });
       if (!r.error) afterMemoryChange();
       return json(res, r.error ? 400 : 200, { ...r, ...state() });
