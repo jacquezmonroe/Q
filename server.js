@@ -14,6 +14,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createEchoFilter } from './echo.js';
 import { openHistory } from './history.js';
+import { parseRemember, readBack, memoryBlock, MAX_MEMORIES, MAX_MEMORY_CHARS } from './memory.js';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(ROOT, 'public');
@@ -56,7 +57,7 @@ const DEFAULTS = {
 const CONFIG = await loadConfig();
 // Raised whenever the page starts needing something new from the server, so a
 // page served by a server that hasn't been restarted can say so.
-const API_LEVEL = 7;
+const API_LEVEL = 8;
 const VERSION = await readFile(path.join(ROOT, 'package.json'), 'utf8').then((t) => JSON.parse(t).version).catch(() => null);
 let stopping = false;
 
@@ -590,8 +591,40 @@ async function persona() {
 }
 
 // The one system prompt, shared by chat turns and the warm-up so they match.
+// Approved memories go first, so the persona's closing honesty check stays last.
 async function systemPrompt() {
-  return `${await persona()}\n\n${TIME_NOTE}`;
+  const mem = saved.settings().useMemories ? memoryBlock(saved.memories()) : '';
+  return `${mem ? `${mem}\n\n` : ''}${await persona()}\n\n${TIME_NOTE}`;
+}
+
+// The memories are part of Q's instructions, so changing them changes the start
+// of every prompt. Re-read the new instructions now, in the background, rather
+// than on his next turn, and stop keep-warm from replaying the old ones.
+function afterMemoryChange() {
+  keep.messages = null;
+  setTimeout(() => { if (!activeChats) warmModel().catch(() => {}); }, 50);
+}
+
+// "Remember that …" is handled in plain code, never by the model (D-042): the
+// fact is saved, Q reads it back in a fixed line so a mishearing shows, and the
+// page offers Undo. The exchange is saved to the conversation like any other.
+function rememberTurn(req, res, send, conv, asked, fact) {
+  let reply;
+  let memory = null;
+  if (!fromOwnPage(req)) reply = 'I can only save memories from Q’s own window.';
+  else {
+    const r = saved.addMemory(fact, 'said');
+    if (r.error === 'duplicate') reply = `I already have that one: ${readBack(r.memory.text)}.`;
+    else if (!r.error) { memory = r.memory; reply = `Got it. I'll remember: ${readBack(r.memory.text)}.`; afterMemoryChange(); }
+    else if (r.error === 'full') reply = `My memory's full. I keep up to ${MAX_MEMORIES} things, so delete one in the panel and ask me again.`;
+    else if (r.error === 'too-long') reply = `That's a bit long for me to keep. Try it in under ${MAX_MEMORY_CHARS} characters.`;
+    else reply = 'I couldn’t save that one.';
+  }
+  send({ type: 'token', text: reply });
+  if (memory) send({ type: 'memory', memory: { id: memory.id, text: memory.text } });
+  send({ type: 'done', stats: { memoryCommand: true } });
+  if (fromOwnPage(req)) { try { saved.record(conv, asked, reply); } catch (err) { console.warn('[q] could not save the turn:', err.message); } }
+  res.end();
 }
 
 // Ollama reuses its work on a prompt only up to the first token that differs
@@ -650,6 +683,10 @@ async function streamChatInner(req, res) {
   res.on('close', () => { if (!res.writableEnded) controller.abort(); });
   res.writeHead(200, { 'content-type': 'application/x-ndjson', 'cache-control': 'no-store' });
   const send = (obj) => res.write(JSON.stringify(obj) + '\n');
+
+  const askedNow = valid[valid.length - 1];
+  const fact = !bench && askedNow?.role === 'user' ? parseRemember(askedNow.content) : null;
+  if (fact) return rememberTurn(req, res, send, body.conv, askedNow.content, fact);
 
   // A turn that arrives during the warm-up waits for it here, so the wait is
   // measured instead of hiding inside Ollama's queue.
@@ -1006,6 +1043,21 @@ const server = http.createServer(async (req, res) => {
       return json(res, 200, await whisperRequest(CONFIG.whisperComparePort, await readBody(req, 25_000_000)));
     }
     if (req.method === 'POST' && pathname === '/api/chat') return await streamChat(req, res);
+    if (pathname.startsWith('/api/memories')) {
+      if (!fromOwnPage(req)) return json(res, 403, { error: 'memories are only available to Q’s own page' });
+      const state = () => ({ available: saved.available, use: saved.settings().useMemories, max: MAX_MEMORIES, maxChars: MAX_MEMORY_CHARS, memories: saved.memories() });
+      if (req.method === 'GET' && pathname === '/api/memories') return json(res, 200, state());
+      if (req.method !== 'POST') return json(res, 405, { error: 'method not allowed' });
+      const body = JSON.parse((await readBody(req, 10_000)).toString('utf8') || '{}');
+      let r = {};
+      if (pathname === '/api/memories/add') r = saved.addMemory(body.text, 'typed');
+      else if (pathname === '/api/memories/update') r = saved.updateMemory(Number(body.id), body.text);
+      else if (pathname === '/api/memories/delete') r = { removed: body.all === true ? saved.clearMemories() : saved.removeMemory(Number(body.id)) };
+      else if (pathname === '/api/memories/settings') saved.setSettings({ useMemories: body.use });
+      else return json(res, 404, { error: 'not found' });
+      if (!r.error) afterMemoryChange();
+      return json(res, r.error ? 400 : 200, { ...r, ...state() });
+    }
     if (pathname.startsWith('/api/history')) {
       if (!fromOwnPage(req)) return json(res, 403, { error: 'saved conversations are only available to Q’s own page' });
       if (req.method === 'GET' && pathname === '/api/history') return json(res, 200, historyState(new URL(req.url, 'http://localhost').searchParams.get('resume') === '1'));

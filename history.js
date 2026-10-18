@@ -12,9 +12,10 @@ export const MAX_TERMS = 8;
 
 import { mkdirSync, chmodSync, statSync } from 'node:fs';
 import path from 'node:path';
+import { cleanMemory, MAX_MEMORIES } from './memory.js';
 
 export const RETENTION_CHOICES = [30, 90, 365, 0]; // days; 0 keeps conversations until they are deleted
-const DEFAULT_SETTINGS = { enabled: true, retentionDays: 90 };
+const DEFAULT_SETTINGS = { enabled: true, retentionDays: 90, useMemories: true };
 const DAY = 86_400_000;
 const validId = (id) => typeof id === 'string' && /^[\w-]{8,64}$/.test(id);
 
@@ -26,6 +27,8 @@ function unavailable(reason) {
     setSettings() { return this.settings(); },
     record: () => false, latest: () => null, list: () => [], remove: () => 0, clear: () => 0, prune: () => 0,
     search: () => [], conversation: () => null, exportMarkdown: () => '',
+    memories: () => [], addMemory: () => ({ error: 'unavailable' }), updateMemory: () => ({ error: 'unavailable' }),
+    removeMemory: () => 0, clearMemories: () => 0,
     stats: () => ({ conversations: 0, turns: 0, oldestAt: null, bytes: 0 }),
     close() {},
   };
@@ -48,6 +51,8 @@ export async function openHistory(file) {
         role text not null check (role in ('user', 'assistant')), content text not null, at integer not null);
       create index if not exists turns_conv on turns (conv, id);
       create table if not exists settings (key text primary key, value text not null);
+      create table if not exists memories (id integer primary key, text text not null, source text not null,
+        created_at integer not null, updated_at integer not null);
     `);
     // The search index. Built from the saved turns the first time this version
     // opens an older file, then kept in step by triggers (deletes included, so
@@ -78,6 +83,11 @@ export async function openHistory(file) {
       (select content from turns where conv = c.id and role = 'user' order by id limit 1) as firstLine
       from conversations c left join turns t on t.conv = c.id group by c.id order by c.last_at desc`),
     one: db.prepare('select id, started_at as startedAt, last_at as lastAt from conversations where id = ?'),
+    memAll: db.prepare('select id, text, source, created_at as createdAt, updated_at as updatedAt from memories order by id'),
+    memAdd: db.prepare('insert into memories (text, source, created_at, updated_at) values (?, ?, ?, ?)'),
+    memSet: db.prepare('update memories set text = ?, updated_at = ? where id = ?'),
+    memDel: db.prepare('delete from memories where id = ?'),
+    memCount: db.prepare('select count(*) as n from memories'),
     find: db.prepare(`select t.conv, t.id, t.role, t.at, snippet(turns_fts, 0, char(2), char(3), '…', 14) as snippet
       from turns_fts join turns t on t.id = turns_fts.rowid where turns_fts match ? order by t.at desc, t.id desc limit ?`),
     removeOne: db.prepare('delete from conversations where id = ?'),
@@ -98,14 +108,17 @@ export async function openHistory(file) {
       const out = { ...DEFAULT_SETTINGS };
       const enabled = q.getSetting.get('enabled');
       const days = q.getSetting.get('retentionDays');
+      const useMem = q.getSetting.get('useMemories');
       if (enabled) out.enabled = enabled.value === '1';
+      if (useMem) out.useMemories = useMem.value === '1';
       if (days && RETENTION_CHOICES.includes(Number(days.value))) out.retentionDays = Number(days.value);
       return out;
     },
 
     // Unknown or invalid values are ignored, never stored.
-    setSettings({ enabled, retentionDays } = {}) {
+    setSettings({ enabled, retentionDays, useMemories } = {}) {
       if (typeof enabled === 'boolean') q.setSetting.run('enabled', enabled ? '1' : '0');
+      if (typeof useMemories === 'boolean') q.setSetting.run('useMemories', useMemories ? '1' : '0');
       if (RETENTION_CHOICES.includes(retentionDays)) q.setSetting.run('retentionDays', String(retentionDays));
       return api.settings();
     },
@@ -184,6 +197,31 @@ export async function openHistory(file) {
       }
       return out.join('\n').replace(/\n{3,}/g, '\n\n').trimEnd() + '\n';
     },
+
+    // ---------- approved memories (v0.4 step 3) ----------
+    // Facts he asked Q to keep. Up to MAX_MEMORIES, each short; the same fact
+    // twice (ignoring case) is refused rather than stored again.
+    memories: () => q.memAll.all(),
+
+    addMemory(text, source = 'typed', now = Date.now()) {
+      const c = cleanMemory(text);
+      if (c.error) return c;
+      const all = q.memAll.all();
+      if (all.some((m) => m.text.toLowerCase() === c.text.toLowerCase())) return { error: 'duplicate', memory: all.find((m) => m.text.toLowerCase() === c.text.toLowerCase()) };
+      if (all.length >= MAX_MEMORIES) return { error: 'full' };
+      const id = Number(q.memAdd.run(c.text, ['said', 'typed', 'suggested'].includes(source) ? source : 'typed', now, now).lastInsertRowid);
+      return { memory: { id, text: c.text, source, createdAt: now, updatedAt: now } };
+    },
+
+    updateMemory(id, text, now = Date.now()) {
+      const c = cleanMemory(text);
+      if (c.error) return c;
+      if (q.memAll.all().some((m) => m.id !== id && m.text.toLowerCase() === c.text.toLowerCase())) return { error: 'duplicate' };
+      return Number(q.memSet.run(c.text, now, Number(id)).changes) ? { memory: { id: Number(id), text: c.text } } : { error: 'not-found' };
+    },
+
+    removeMemory: (id) => Number(q.memDel.run(Number(id)).changes),
+    clearMemories: () => Number(db.prepare('delete from memories').run().changes),
 
     stats() {
       let bytes = 0;

@@ -7,7 +7,7 @@ import { SCHEMA, MAX_RUNS, MIN_FOR_P90, IDLE_MS, kindOf, sameWords, summarize, b
 
 // What this page needs from the server (server.js API_LEVEL). A server started
 // before an update keeps serving new pages until it is restarted.
-const NEEDS_API = 7;
+const NEEDS_API = 8;
 
 const $ = (sel) => document.querySelector(sel);
 const els = {
@@ -65,6 +65,13 @@ const els = {
   hvContinue: $('#hvContinue'),
   hvExport: $('#hvExport'),
   hvDelete: $('#hvDelete'),
+  memCount: $('#memCount'),
+  memNote: $('#memNote'),
+  memList: $('#memList'),
+  memAdd: $('#memAdd'),
+  memInput: $('#memInput'),
+  useMemories: $('#useMemories'),
+  clearMemories: $('#clearMemories'),
   micNote: $('#micNote'),
   compare: $('#compare'),
   compareNote: $('#compareNote'),
@@ -616,6 +623,8 @@ async function runTurn(text) {
           pending = cut.rest;
           if (cut.chunks.length && !t.firstChunk) t.firstChunk = cut.clause ? 'clause' : 'sentence';
           cut.chunks.forEach(speakSentence);
+        } else if (msg.type === 'memory') {
+          memorySaved(msg.memory);
         } else if (msg.type === 'done') {
           t.stats = msg.stats;
         } else if (msg.type === 'error') {
@@ -629,7 +638,7 @@ async function runTurn(text) {
     const st = t.stats;
     setBubble(bubble, full || '(no reply)', {
       streaming: false,
-      meta: st ? `${st.evalTokens} tokens · ${st.tokPerSec ? st.tokPerSec.toFixed(1) : '—'} tok/s${coldMs(st) ? ` · cold start ${(coldMs(st) / 1000).toFixed(1)} s` : st.idleMs >= IDLE_MS ? ` · after ${(st.idleMs / 60000).toFixed(1)} min idle` : ''}` : '',
+      meta: st?.memoryCommand ? 'saved to memories' : st ? `${st.evalTokens} tokens · ${st.tokPerSec ? st.tokPerSec.toFixed(1) : '—'} tok/s${coldMs(st) ? ` · cold start ${(coldMs(st) / 1000).toFixed(1)} s` : st.idleMs >= IDLE_MS ? ` · after ${(st.idleMs / 60000).toFixed(1)} min idle` : ''}` : '',
     });
     renderLatency();
     if (!out().playing) finishTurn();
@@ -699,6 +708,98 @@ function whenSaid(ms) {
   const time = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
   return d.toDateString() === new Date().toDateString() ? time : `${d.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })}, ${time}`;
 }
+
+// ---------- approved memories (v0.4 step 3) ----------
+// Facts Q keeps about him, saved only when he asks. Saying "remember that …"
+// is handled by the server without the model; this card lists them for
+// editing and deleting, and turns their use on or off.
+const memState = { list: [], max: 20 };
+
+function renderMemories(st) {
+  if (!st) { els.memNote.textContent = 'Couldn’t reach the server to check.'; return; }
+  memState.list = st.memories;
+  memState.max = st.max;
+  els.memCount.textContent = `${st.memories.length} of ${st.max}`;
+  els.useMemories.disabled = !st.available;
+  els.useMemories.checked = !!st.use;
+  els.clearMemories.disabled = !st.memories.length;
+  els.memInput.disabled = !st.available || st.memories.length >= st.max;
+  els.memList.replaceChildren(...st.memories.map(memoryRow));
+  if (st.available && !st.use) els.memNote.textContent = 'Off: Q isn’t shown these right now. They’re kept until you delete them.';
+  else if (st.memories.length >= st.max) els.memNote.textContent = `Full. Q keeps up to ${st.max}; delete one to add another.`;
+  else els.memNote.textContent = 'Say “remember that …” to Q, or add one here. Q reads each one back so you can catch a mishearing.';
+}
+
+function memoryRow(m) {
+  const row = document.createElement('div');
+  row.className = 'mem-item';
+  const text = document.createElement('span');
+  text.className = 'text';
+  text.textContent = m.text;
+  const edit = document.createElement('button');
+  edit.type = 'button'; edit.className = 'ghost'; edit.textContent = 'Edit';
+  const del = document.createElement('button');
+  del.type = 'button'; del.className = 'ghost'; del.textContent = 'Delete';
+  edit.addEventListener('click', () => {
+    const input = document.createElement('input');
+    input.value = m.text; input.maxLength = 140;
+    const saveBtn = document.createElement('button');
+    saveBtn.type = 'button'; saveBtn.className = 'ghost'; saveBtn.textContent = 'Save';
+    const cancel = document.createElement('button');
+    cancel.type = 'button'; cancel.className = 'ghost'; cancel.textContent = 'Cancel';
+    const done = async () => { if (await memoryCall('update', { id: m.id, text: input.value })) return; input.focus(); };
+    saveBtn.addEventListener('click', done);
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); done(); } if (e.key === 'Escape') { e.stopPropagation(); loadMemories(); } });
+    cancel.addEventListener('click', () => loadMemories());
+    row.replaceChildren(input, saveBtn, cancel);
+    input.focus();
+  });
+  del.addEventListener('click', () => memoryCall('delete', { id: m.id }));
+  row.append(text, edit, del);
+  return row;
+}
+
+const MEMORY_ERRORS = { empty: 'Type something first.', 'too-long': 'Keep it under 140 characters.', duplicate: 'Q already has that one.', full: 'Memories are full; delete one first.', 'not-found': 'That memory is gone.' };
+
+async function memoryCall(action, body) {
+  try {
+    const r = await fetch(`/api/memories/${action}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    const st = await r.json();
+    renderMemories(st);
+    if (st.error) { els.memNote.textContent = MEMORY_ERRORS[st.error] || `Couldn’t change memories: ${st.error}`; return false; }
+    return true;
+  } catch (err) { els.memNote.textContent = `Couldn’t change memories: ${err.message}`; return false; }
+}
+
+const loadMemories = () => fetch('/api/memories').then((r) => (r.ok ? r.json() : null)).then(renderMemories).catch(() => renderMemories(null));
+
+// After "remember that …": the fact is saved already; offer to take it back.
+function memorySaved(m) {
+  loadMemories();
+  els.empty.hidden = true;
+  const el = document.createElement('div');
+  el.className = 'note';
+  el.textContent = `Saved to memories: ${m.text}`;
+  const undo = document.createElement('button');
+  undo.type = 'button'; undo.className = 'ghost undo'; undo.textContent = 'Undo';
+  undo.addEventListener('click', async () => {
+    undo.disabled = true;
+    if (await memoryCall('delete', { id: m.id })) el.textContent = `Forgotten: ${m.text}`;
+  });
+  el.appendChild(undo);
+  els.log.appendChild(el);
+  els.log.scrollTop = els.log.scrollHeight;
+}
+
+els.memAdd.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  if (await memoryCall('add', { text: els.memInput.value })) els.memInput.value = '';
+});
+els.useMemories.addEventListener('change', () => memoryCall('settings', { use: els.useMemories.checked }));
+els.clearMemories.addEventListener('click', async () => {
+  if (!confirm('Delete every memory Q keeps about you? This can’t be undone.')) return;
+  memoryCall('delete', { all: true });
+});
 
 // ---------- browsing saved conversations ----------
 const hv = { conv: null, searchTimer: null, asked: 0 };
@@ -854,6 +955,7 @@ els.deleteAll.addEventListener('click', async () => {
 
 // Numbers only: nothing said or heard is ever stored here.
 function recordTurn(t) {
+  if (t.stats?.memoryCommand) return; // a "remember …" turn never reaches the model, so it has no timings worth keeping
   if (t.recorded) return;
   t.recorded = true;
   const st = t.stats || {};
@@ -1250,6 +1352,7 @@ navigator.mediaDevices?.addEventListener?.('devicechange', checkDefaultMic);
 
 setPhase('boot');
 loadSaved(true);
+loadMemories();
 renderHistory();
 await refreshStatus();
 checkDefaultMic();

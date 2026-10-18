@@ -169,10 +169,13 @@ Not started. Nothing Q hears or says is saved.
 
 - [ ] Searchable local history.
   - [x] Step 1 (2026-10-13, D-037): conversations are saved to a local SQLite file. Confirmed by Jacquez: saving, carrying on after a restart, deleting.
-  - [ ] Step 2: a History view with keyword search, and export: built 2026-10-16 (D-040), waiting for Jacquez.
-- [ ] Long-term memories saved only after Jacquez approves them. No code.
+  - [x] Step 2: a History view with keyword search, and export (D-040; confirmed by Jacquez 2026-10-17).
+- [ ] Long-term memories saved only after Jacquez approves them (D-042).
+  - [ ] Step 3a, his memories: built 2026-10-17, tested with stand-ins, persona wording approved 2026-10-18; waiting for Jacquez to try it.
+  - [ ] Step 3b, Q suggesting memories, which he confirms.
+  - [ ] Forgetting by voice (later).
 - [ ] Session continuity. Step 1 carries on the last conversation after a reload or restart if it was active within 6 hours. Nothing yet carries across separate conversations.
-- [ ] Deletion, retention and export controls for memory. Deletion (one or all), pause and retention are in step 1; export to Markdown in step 2 (built, not yet confirmed).
+- [x] Deletion, retention and export controls for saved conversations: delete one or all, pause and retention (step 1); export to Markdown (step 2). Memories in step 3 will need their own.
 - [x] Storage choice: Node's built-in SQLite, keyword search later, no embeddings (D-011 adopted through D-037).
 - The only things stored today are settings and latency numbers in the browser's local storage.
 

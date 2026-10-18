@@ -83,6 +83,23 @@ try {
   check('delete everything empties it', h.clear() === before && before > 0 && h.stats().conversations === 0 && h.stats().turns === 0 && h.latest() === null);
   check('after delete everything, the words are gone from the file', !readFileSync(file).includes(SECRET) && !readFileSync(file).includes('Second conversation'));
   check('settings survive delete everything', h.settings().retentionDays === 0);
+  console.log('approved memories');
+  const m1 = h.addMemory("  my sister's name is Ada. ", 'said', t0);
+  check('adds a memory, tidied', m1.memory?.text === "My sister's name is Ada" && m1.memory.source === 'said', JSON.stringify(m1));
+  check('refuses the same fact again, ignoring case', h.addMemory("MY SISTER'S NAME IS ADA").error === 'duplicate' && h.memories().length === 1);
+  check('refuses empty and over-long facts', h.addMemory('  ').error === 'empty' && h.addMemory('x'.repeat(141)).error === 'too-long');
+  for (let i = 2; i <= 20; i++) h.addMemory(`Fact number ${i}`);
+  check('holds up to 20', h.memories().length === 20 && h.addMemory('One too many').error === 'full');
+  check('edits one', h.updateMemory(m1.memory.id, 'My sister Ada lives in Lagos').memory?.text === 'My sister Ada lives in Lagos' && h.memories()[0].text === 'My sister Ada lives in Lagos');
+  check('an edit can’t duplicate another memory', h.updateMemory(m1.memory.id, 'fact number 2').error === 'duplicate' && h.updateMemory(9999, 'whatever here').error === 'not-found');
+  check('deletes one', h.removeMemory(m1.memory.id) === 1 && h.memories().length === 19 && h.removeMemory(m1.memory.id) === 0);
+  check('"use memories" is on by default and can be turned off', h.settings().useMemories === true && h.setSettings({ useMemories: false }).useMemories === false && h.setSettings({ useMemories: true }).useMemories === true);
+  h.addMemory(`The code word is ${SECRET}`);
+  check('delete all memories empties them', h.clearMemories() === 20 && h.memories().length === 0);
+  check('deleting conversations leaves memories alone, and the other way round', (() => { h.addMemory('Kept across a conversation wipe'); h.clear(); return h.memories().length === 1; })());
+  h.clearMemories();
+  check('a deleted memory leaves no trace in the file', !readFileSync(file).includes(SECRET));
+
   h.close();
 
   const again = await openHistory(file);

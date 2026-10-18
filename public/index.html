@@ -79,6 +79,18 @@
       </section>
 
       <section class="glass card">
+        <h2>Memories <span class="h2sub" id="memCount">things Q keeps about you</span></h2>
+        <p class="hint" id="memNote">Say “remember that …” to Q, or add one here. Q reads each one back so you can catch a mishearing.</p>
+        <div id="memList" class="mem-list"></div>
+        <form id="memAdd" class="mem-add" autocomplete="off">
+          <input id="memInput" type="text" maxlength="140" placeholder="Add something for Q to remember…" aria-label="New memory" />
+          <button type="submit" class="ghost">Add</button>
+        </form>
+        <label class="toggle"><input id="useMemories" type="checkbox" disabled /><span>Let Q use these</span></label>
+        <div class="runbtns"><button id="clearMemories" type="button" class="ghost" disabled>Delete all memories</button></div>
+      </section>
+
+      <section class="glass card">
         <h2>Latency <span class="h2sub">last turn</span></h2>
         <div class="bigline">
           <div class="big"><span id="v2v">-.--</span><small>s</small></div>

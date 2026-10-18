@@ -366,3 +366,13 @@ html.compact .hview { display: none !important; }
 .hv-turn.user { background: rgba(59, 130, 246, 0.14); }
 .hv-turn .who { display: block; font-size: 11px; color: var(--text-3); margin-bottom: 2px; }
 .hv-turn.found { border-color: var(--cyan); }
+
+/* ---------- memories ---------- */
+.mem-list { display: flex; flex-direction: column; gap: 6px; margin: 8px 0; }
+.mem-item { display: flex; align-items: center; gap: 6px; padding: 6px 8px; border-radius: 10px; background: var(--glass); border: 1px solid var(--line); }
+.mem-item .text { flex: 1; min-width: 0; font-size: 13px; overflow-wrap: anywhere; }
+.mem-item input { flex: 1; min-width: 0; font: inherit; font-size: 13px; color: var(--text); background: rgba(4, 8, 18, 0.6); border: 1px solid var(--line-hi); border-radius: 8px; padding: 4px 8px; }
+.mem-item .ghost { padding: 3px 8px; font-size: 11px; }
+.mem-add { display: flex; gap: 6px; margin-bottom: 8px; }
+.mem-add input { flex: 1; min-width: 0; font: inherit; font-size: 13px; color: var(--text); background: rgba(4, 8, 18, 0.6); border: 1px solid var(--line-hi); border-radius: 10px; padding: 7px 10px; }
+.note .undo { margin-left: 8px; padding: 2px 8px; font-size: 11px; }
