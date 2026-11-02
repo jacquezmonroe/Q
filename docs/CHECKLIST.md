@@ -171,8 +171,8 @@ Not started. Nothing Q hears or says is saved.
   - [x] Step 1 (2026-10-13, D-037): conversations are saved to a local SQLite file. Confirmed by Jacquez: saving, carrying on after a restart, deleting.
   - [x] Step 2: a History view with keyword search, and export (D-040; confirmed by Jacquez 2026-10-17).
 - [ ] Long-term memories saved only after Jacquez approves them (D-042).
-  - [ ] Step 3a, his memories: built 2026-10-17, tested with stand-ins, persona wording approved 2026-10-18; waiting for Jacquez to try it.
-  - [ ] Step 3b, Q suggesting memories, which he confirms: built 2026-10-18 (D-043), persona addition approved; waiting for Jacquez to try it.
+  - [x] Step 3a, his memories (confirmed by Jacquez 2026-11-02).
+  - [x] Step 3b, Q suggesting memories, which he confirms (D-043; confirmed by Jacquez 2026-11-02).
   - [ ] Forgetting by voice (later).
 - [ ] Session continuity. Step 1 carries on the last conversation after a reload or restart if it was active within 6 hours. Nothing yet carries across separate conversations.
 - [x] Deletion, retention and export controls for saved conversations: delete one or all, pause and retention (step 1); export to Markdown (step 2). Memories in step 3 will need their own.
