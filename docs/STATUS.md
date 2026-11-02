@@ -136,8 +136,8 @@ _Claude Code updates this after every change. Labels: **proposed → approved �
 Order set by D-044:
 1. Done 2026-11-02: Jacquez confirmed memories (steps 3a and 3b).
 2. Personality Core 2.1 Phase 0: benchmark on power with Low Power Mode off, and confirm the sources for the culture cards.
-3. Personality Core 2.1, Phases 1 to 6, each approved first.
-4. v0.5 actions. Curiosity Mode (D-041) stays after v0.4. v0.4 step 4 (recall on request) is waiting for a decision on where it goes.
+3. Personality Core 2.1, Phases 1 to 6, each approved first. Plan: `docs/personality-core-2.1.md`. Phase 1 approved 2026-11-02. A voice baseline on the current persona is needed before Phase 3.
+4. v0.4 step 4, recall on request (D-052), and v0.5 actions. Curiosity Mode (D-041, `docs/curiosity-mode.md`) comes after v0.4. The Master Plan the 2.1 plan cites is not in the repo.
 
 The full list is in [CHECKLIST.md](CHECKLIST.md).
 
@@ -667,5 +667,10 @@ Suitable: dog's name (the persona's own example, 3 of 3), moving to Atlanta (1 o
 
 ### 2026-11-02 — Personality Core 2.1 Phase 0: benchmark taken under Low Power Mode (not a baseline)
 14 typed turns on a test copy with a throwaway history, Mac on battery with Low Power Mode on, Ollama 0.40.13 (was 0.40.3): generation 8–12 tokens per second (18–25 on 2026-10-13), median prompt processing 0.64 s (about 0.3 s), warm-up 37 s, two turns over 3 s to first token. Measured straight against Ollama: 11.6–13 tokens per second, on the GPU. **A valid baseline still needs the Mac on power with Low Power Mode off**, and key-release-to-first-audio needs real voice turns. Not separated: how much of the drop is Low Power Mode and how much the newer Ollama.
+
+### 2026-11-02 — Personality Core 2.1 Phase 0: baseline with Low Power Mode off
+14 typed turns on the running Q, on battery, Low Power Mode off, Ollama 0.40.13, 7.4 GB of 8 GB swap in use: generation 18–22 tokens per second, median prompt processing 0.33 s, first token about 0.35 s. So the earlier drop was Low Power Mode, which cut generation to about half, not the newer Ollama. Turns 9 and 13, where history is trimmed, took 1.45 s; the benchmark sends the next turn at once, before priming can finish, so this says nothing about priming in real use (0.23–0.38 s on 2026-10-12). Key-release-to-first-audio with the current persona is still to be measured from real voice turns.
+
+Sources for the culture cards, read 2026-11-02: National Archives' own works are public domain and CC0, but not everything it holds; National Park Service's own material is generally public domain, third-party content excepted; Library of Congress doesn't own most of its collections, so each item has to be checked; Wikipedia text is CC BY-SA 4.0, needing attribution and share-alike if text is reused. The Smithsonian's terms page refused the request, so its terms are unconfirmed; the plan already treats it as copyrighted. Either way, cards are to be written in our own words with a source link; the repository is public, so they are published.
 
 None of the speech-engine tables above are end-to-end numbers from Jacquez's browser. The cache benchmark (`scripts/bench-cache.mjs`) has not been run against real Ollama yet.
