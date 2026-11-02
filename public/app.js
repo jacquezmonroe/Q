@@ -7,7 +7,7 @@ import { SCHEMA, MAX_RUNS, MIN_FOR_P90, IDLE_MS, kindOf, sameWords, summarize, b
 
 // What this page needs from the server (server.js API_LEVEL). A server started
 // before an update keeps serving new pages until it is restarted.
-const NEEDS_API = 9;
+const NEEDS_API = 10;
 
 const $ = (sel) => document.querySelector(sel);
 const els = {
@@ -65,6 +65,7 @@ const els = {
   hvContinue: $('#hvContinue'),
   hvExport: $('#hvExport'),
   hvDelete: $('#hvDelete'),
+  personaChip: $('#personaChip'),
   memCount: $('#memCount'),
   memNote: $('#memNote'),
   memList: $('#memList'),
@@ -388,6 +389,7 @@ async function refreshStatus() {
   }
   renderStatus();
   renderTally();
+  renderPersonality(S.status?.personality);
   if (['boot', 'offline', 'warming', 'idle'].includes(S.phase)) settle();
   if (warming()) warmPoll = setTimeout(refreshStatus, 1000);
 }
@@ -624,6 +626,8 @@ async function runTurn(text) {
           pending = cut.rest;
           if (cut.chunks.length && !t.firstChunk) t.firstChunk = cut.clause ? 'clause' : 'sentence';
           cut.chunks.forEach(speakSentence);
+        } else if (msg.type === 'personality') {
+          renderPersonality(msg.state);
         } else if (msg.type === 'memory') {
           memorySaved(msg.memory);
         } else if (msg.type === 'suggestion') {
@@ -641,7 +645,7 @@ async function runTurn(text) {
     const st = t.stats;
     setBubble(bubble, full || '(no reply)', {
       streaming: false,
-      meta: st?.memoryCommand ? 'saved to memories' : st ? `${st.evalTokens} tokens · ${st.tokPerSec ? st.tokPerSec.toFixed(1) : '—'} tok/s${coldMs(st) ? ` · cold start ${(coldMs(st) / 1000).toFixed(1)} s` : st.idleMs >= IDLE_MS ? ` · after ${(st.idleMs / 60000).toFixed(1)} min idle` : ''}` : '',
+      meta: st?.memoryCommand ? (st.label || 'saved to memories') : st ? `${st.evalTokens} tokens · ${st.tokPerSec ? st.tokPerSec.toFixed(1) : '—'} tok/s${coldMs(st) ? ` · cold start ${(coldMs(st) / 1000).toFixed(1)} s` : st.idleMs >= IDLE_MS ? ` · after ${(st.idleMs / 60000).toFixed(1)} min idle` : ''}` : '',
     });
     renderLatency();
     if (!out().playing) finishTurn();
@@ -711,6 +715,29 @@ function whenSaid(ms) {
   const time = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
   return d.toDateString() === new Date().toDateString() ? time : `${d.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })}, ${time}`;
 }
+
+// ---------- personality settings ----------
+// The chip shows the settings as the server holds them. Until they take effect
+// it says so. Q's window gets the same state for its menu's checkmarks.
+const LEVEL_NAMES = { chill: 'Chill', playful: 'Playful', wildin: 'Wildin\'' };
+function renderPersonality(p) {
+  if (!p) return;
+  const mode = p.mode.charAt(0).toUpperCase() + p.mode.slice(1);
+  els.personaChip.hidden = false;
+  els.personaChip.textContent = `${mode} · ${LEVEL_NAMES[p.level]} · Mouth ${p.watchYourMouth ? 'on' : 'off'}${p.active ? '' : ' · not active yet'}`;
+  els.personaChip.title = p.problem || (p.active ? 'Q’s personality settings' : 'Saved. These change how Q talks once the new personality is built.');
+  els.personaChip.disabled = !shell; // only Q's window has the menu
+  shell?.postMessage(`personality:${JSON.stringify(p)}`);
+}
+els.personaChip.addEventListener('click', () => shell?.postMessage('personality-menu'));
+// Q's window calls this from its Personality menu.
+window.qSetPersonality = async (change) => {
+  try {
+    const r = await fetch('/api/personality', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(change) });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    renderPersonality(await r.json());
+  } catch (err) { systemNote(`Couldn’t change that setting: ${err.message}`, 'err'); }
+};
 
 // ---------- approved memories (v0.4 step 3) ----------
 // Facts Q keeps about him, saved only when he asks. Saying "remember that …"
@@ -1308,6 +1335,7 @@ function setCompact(on) {
 window.qSetCompact = setCompact;
 window.qOrbClick = orbClick; // the window handles the mouse itself in compact mode, so it can be dragged
 if (shell) {
+  document.documentElement.classList.add('in-shell');
   els.shrink.hidden = false;
   els.shrink.addEventListener('click', () => shell.postMessage('shrink'));
   setCompact(document.documentElement.classList.contains('compact'));

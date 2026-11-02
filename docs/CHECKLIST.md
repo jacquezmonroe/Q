@@ -165,7 +165,7 @@ Not started. Q runs only as a page in a browser tab.
 
 # v0.4 — persistent history, approved memories, session continuity
 
-Not started. Nothing Q hears or says is saved.
+In progress. Conversations are saved since D-037 and memories since D-042. Recall on request is left, after Personality Core 2.1 (D-052).
 
 - [ ] Searchable local history.
   - [x] Step 1 (2026-10-13, D-037): conversations are saved to a local SQLite file. Confirmed by Jacquez: saving, carrying on after a restart, deleting.
@@ -178,6 +178,16 @@ Not started. Nothing Q hears or says is saved.
 - [x] Deletion, retention and export controls for saved conversations: delete one or all, pause and retention (step 1); export to Markdown (step 2). Memories in step 3 will need their own.
 - [x] Storage choice: Node's built-in SQLite, keyword search later, no embeddings (D-011 adopted through D-037).
 - The only things stored today are settings and latency numbers in the browser's local storage.
+
+# Personality Core 2.1 — before v0.5 (D-044; plan in `docs/personality-core-2.1.md`)
+
+- [x] Phase 0: repo check, decisions logged (D-044 to D-051), baseline with Low Power Mode off, sources read. Jacquez accepted the existing voice baseline.
+- [x] Phase 1: settings, Personality menu, spoken commands, chip (confirmed by Jacquez 2026-11-02; by typing, real voice still to try).
+- [ ] Phase 2: output filter, on the server, including the Cultural language toggle.
+- [ ] Phase 3: persona 2.1. Must keep the memory lines, the sharper first-sentence rule, the closing honesty check and the honesty examples. Jacquez edits the example lines.
+- [ ] Phase 4: auto mode and serious-moment detection.
+- [ ] Phase 5: culture cards and Learning Moments.
+- [ ] Phase 6: full test run and report.
 
 # v0.5 — a few approved, verified Mac actions
 

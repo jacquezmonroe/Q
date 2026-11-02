@@ -14,6 +14,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createEchoFilter } from './echo.js';
 import { openHistory } from './history.js';
+import { parseCommand, commandReply, cleanSettings, loadSettings, saveSettings, ACTIVE as PERSONALITY_ACTIVE } from './personality.js';
 import { parseRemember, readBack, memoryBlock, createSuggestionFilter, offerable, answerTo, MAX_MEMORIES, MAX_MEMORY_CHARS } from './memory.js';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
@@ -36,7 +37,7 @@ const DEFAULTS = {
   whisperThreads: 4,
   // Words Whisper should expect, written as ordinary speech. It only nudges
   // spelling of names and jargon; set to '' to turn it off.
-  whisperPrompt: 'Hey Q. Yo Q, what\'s good? Q, open VS Code. Ollama, Whisper, MacBook Air, GitHub.',
+  whisperPrompt: 'Hey Q. Yo Q, what\'s good? Q, open VS Code. Ollama, Whisper, MacBook Air, GitHub. Cuttin\' Up, WATCHYAMOUTH.',
   whisperPort: 4142,
   // A second Whisper model to compare against, started only when the page asks for it.
   whisperCompareModel: 'models/ggml-small.en.bin',
@@ -57,7 +58,7 @@ const DEFAULTS = {
 const CONFIG = await loadConfig();
 // Raised whenever the page starts needing something new from the server, so a
 // page served by a server that hasn't been restarted can say so.
-const API_LEVEL = 9;
+const API_LEVEL = 10;
 const VERSION = await readFile(path.join(ROOT, 'package.json'), 'utf8').then((t) => JSON.parse(t).version).catch(() => null);
 let stopping = false;
 
@@ -67,6 +68,18 @@ let stopping = false;
 // times a day.
 // (Named `saved` because the chat handler already calls its message list `history`.)
 const saved = await openHistory(CONFIG.historyFile);
+// Personality settings live in their own file next to the history, shared by
+// Q's window and any browser.
+const personalityFile = path.join(path.dirname(CONFIG.historyFile), 'settings.json');
+const personality = loadSettings(personalityFile);
+if (personality.problem) console.warn(`[q] ${personality.problem}`);
+const personalityState = () => ({ ...personality.settings, active: PERSONALITY_ACTIVE, problem: personality.problem });
+function changePersonality(change) {
+  personality.settings = cleanSettings(change, personality.settings);
+  saveSettings(personalityFile, personality.settings);
+  personality.problem = null;
+}
+
 // After a restart the page carries on the last conversation if it was active this recently.
 const RESUME_MS = 6 * 3600_000;
 const pruneHistory = () => { try { saved.prune(); } catch (err) { console.warn('[q] history prune failed:', err.message); } };
@@ -628,10 +641,10 @@ function answerSuggestion(conv, accept) {
 }
 
 // A fixed reply instead of the model's (remembering, answering a suggestion).
-function fixedTurn(req, res, send, conv, asked, reply, memory) {
+function fixedTurn(req, res, send, conv, asked, reply, memory, label) {
   send({ type: 'token', text: reply });
   if (memory) send({ type: 'memory', memory: { id: memory.id, text: memory.text } });
-  send({ type: 'done', stats: { memoryCommand: true } });
+  send({ type: 'done', stats: { memoryCommand: true, label } });
   if (fromOwnPage(req)) { try { saved.record(conv, asked, reply); } catch (err) { console.warn('[q] could not save the turn:', err.message); } }
   res.end();
 }
@@ -733,6 +746,18 @@ async function streamChatInner(req, res) {
   const send = (obj) => res.write(JSON.stringify(obj) + '\n');
 
   const askedNow = valid[valid.length - 1];
+  // "Work mode", "Cuttin' Up chill" and the like: settings changed in plain code, never by the model.
+  const command = !bench && askedNow?.role === 'user' ? parseCommand(askedNow.content) : null;
+  if (command) {
+    if (!fromOwnPage(req)) return fixedTurn(req, res, send, body.conv, askedNow.content, 'I can only change settings from Q’s own window.');
+    try { changePersonality(command.change); } catch (err) {
+      console.warn('[q] could not save the settings:', err.message);
+      return fixedTurn(req, res, send, body.conv, askedNow.content, 'I couldn’t save that setting.', null, 'setting not saved');
+    }
+    pendingSuggestion.delete(body.conv);
+    send({ type: 'personality', state: personalityState() });
+    return fixedTurn(req, res, send, body.conv, askedNow.content, commandReply(command.label), null, 'setting changed');
+  }
   const fact = !bench && askedNow?.role === 'user' ? parseRemember(askedNow.content) : null;
   if (fact) return rememberTurn(req, res, send, body.conv, askedNow.content, fact);
   // A plain yes or no right after Q suggested a memory answers the suggestion.
@@ -1076,6 +1101,7 @@ const server = http.createServer(async (req, res) => {
         ollama,
         warmup: { state: warm.state, ms: warm.ms, error: warm.error },
         compare: { available: cmp.available, on: !!cmp.proc, ready: cmp.ready, model: path.basename(CONFIG.whisperCompareModel) },
+        personality: personalityState(),
         keepWarm: { until: keepWarmUntil() > Date.now() ? keepWarmUntil() : null, hadTurn: keep.lastTurnAt > 0, everySeconds: CONFIG.keepWarmSeconds, minutes: CONFIG.keepWarmMinutes },
         stt: { mode: stt.mode, ready: stt.mode === 'cli' || (stt.mode === 'server' && stt.serverReady), model: path.basename(CONFIG.whisperModel), error: stt.mode === 'none' ? stt.lastError : null },
         tts: { engine: tts.engine, available: tts.available, error: tts.available ? null : tts.lastError, note: tts.note, defaultVoice: tts.voices.some((v) => v.name === CONFIG.sayVoice) ? CONFIG.sayVoice : null },
@@ -1117,6 +1143,12 @@ const server = http.createServer(async (req, res) => {
       return json(res, 200, await whisperRequest(CONFIG.whisperComparePort, await readBody(req, 25_000_000)));
     }
     if (req.method === 'POST' && pathname === '/api/chat') return await streamChat(req, res);
+    if (pathname === '/api/personality') {
+      if (!fromOwnPage(req)) return json(res, 403, { error: 'settings are only available to Q’s own page' });
+      if (req.method === 'POST') changePersonality(JSON.parse((await readBody(req, 10_000)).toString('utf8') || '{}'));
+      else if (req.method !== 'GET') return json(res, 405, { error: 'method not allowed' });
+      return json(res, 200, personalityState());
+    }
     if (pathname.startsWith('/api/memories')) {
       if (!fromOwnPage(req)) return json(res, 403, { error: 'memories are only available to Q’s own page' });
       const state = () => ({ available: saved.available, use: saved.settings().useMemories, max: MAX_MEMORIES, maxChars: MAX_MEMORY_CHARS, memories: saved.memories() });

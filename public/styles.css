@@ -376,3 +376,15 @@ html.compact .hview { display: none !important; }
 .mem-add { display: flex; gap: 6px; margin-bottom: 8px; }
 .mem-add input { flex: 1; min-width: 0; font: inherit; font-size: 13px; color: var(--text); background: rgba(4, 8, 18, 0.6); border: 1px solid var(--line-hi); border-radius: 10px; padding: 7px 10px; }
 .note .undo { margin-left: 8px; padding: 2px 8px; font-size: 11px; }
+
+/* ---------- personality chip ---------- */
+.top-right { display: flex; align-items: center; gap: 14px; min-width: 0; }
+#personaChip { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 720px) { #clock { display: none; } .brand span { display: none; } #personaChip { font-size: 11px; } }
+#personaChip { background: none; border: 0; padding: 0; text-align: right; }
+#personaChip:enabled { cursor: pointer; }
+#personaChip:enabled:hover { color: var(--cyan); }
+#shrink { white-space: nowrap; }
+/* In Q's own window the macOS window buttons sit at the top left; keep the mark clear of them. */
+html.in-shell .top { padding-left: 84px; }
+@media (max-width: 720px) { #personaChip { white-space: normal; line-height: 1.25; } }

@@ -129,6 +129,9 @@ final class Shell: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigati
   var pageUp = false     // Q's page is loaded, not the placeholder
   var problem = false    // the placeholder is showing something that needs attention
   var quitting = false
+  var personalityItems: [String: NSMenuItem] = [:]
+  var personalityNote: NSMenuItem!
+  var personalitySub: NSMenu!
   var waiter: Timer?
 
   // Where the orb itself is, whether or not the window is widened for a caption.
@@ -180,6 +183,7 @@ final class Shell: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigati
     modeItem = menu.addItem(withTitle: "", action: #selector(switchMode), keyEquivalent: "")
     modeItem.target = self
     menu.addItem(withTitle: "Show or hide Q", action: #selector(toggle), keyEquivalent: "").target = self
+    menu.addItem(personalityMenu())
     menu.addItem(withTitle: "Reload", action: #selector(reload), keyEquivalent: "").target = self
     menu.addItem(withTitle: "Show server log", action: #selector(showLog), keyEquivalent: "").target = self
     menu.addItem(.separator())
@@ -192,6 +196,59 @@ final class Shell: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigati
     registerHotKey()
     log("window up")
     connect()
+  }
+
+  // ---------- personality settings ----------
+  // The page holds the state and talks to the server; this menu only shows it
+  // and asks for changes. Items stay disabled until the page has reported in.
+
+  func personalityMenu() -> NSMenuItem {
+    let sub = NSMenu(title: "Personality")
+    sub.autoenablesItems = false
+    let group: (String, [(String, String, String)]) -> Void = { heading, choices in
+      sub.addItem(NSMenuItem.sectionHeader(title: heading))
+      for (title, key, value) in choices {
+        let item = sub.addItem(withTitle: title, action: #selector(self.choosePersonality(_:)), keyEquivalent: "")
+        item.target = self
+        item.isEnabled = false
+        item.representedObject = "{\(key): \(value)}"
+        self.personalityItems["\(key)=\(value)"] = item
+      }
+    }
+    group("Mode", [("Auto", "mode", "'auto'"), ("Casual", "mode", "'casual'"), ("Work", "mode", "'work'")])
+    group("CUTTIN' UP", [("Chill", "level", "'chill'"), ("Playful", "level", "'playful'"), ("Wildin'", "level", "'wildin'")])
+    group("WATCHYAMOUTH", [("On", "watchYourMouth", "true"), ("Off", "watchYourMouth", "false")])
+    group("Cultural Learning Moments", [("On", "learningMoments", "true"), ("Off", "learningMoments", "false")])
+    personalityNote = sub.addItem(withTitle: "Not active yet", action: nil, keyEquivalent: "")
+    personalityNote.isEnabled = false
+    personalitySub = sub
+    let parent = NSMenuItem(title: "Personality", action: nil, keyEquivalent: "")
+    parent.submenu = sub
+    return parent
+  }
+
+  // The chip in the panel opens the same menu where he clicked. A copy, because
+  // the original already belongs to the menu bar item.
+  func popPersonality() {
+    guard let menu = personalitySub.copy() as? NSMenu else { return }
+    menu.popUp(positioning: nil, at: NSEvent.mouseLocation, in: nil)
+  }
+
+  // Each item's value is a fixed literal set above, never text from elsewhere.
+  @objc func choosePersonality(_ sender: NSMenuItem) {
+    guard let change = sender.representedObject as? String else { return }
+    web.evaluateJavaScript("window.qSetPersonality && window.qSetPersonality(\(change))")
+  }
+
+  func showPersonality(_ json: String) {
+    guard let data = json.data(using: .utf8), let p = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return }
+    let current = ["mode=\(p["mode"].map { "'\($0)'" } ?? "")", "level=\(p["level"].map { "'\($0)'" } ?? "")",
+                   "watchYourMouth=\((p["watchYourMouth"] as? Bool) == true)", "learningMoments=\((p["learningMoments"] as? Bool) == true)"]
+    for (key, item) in personalityItems {
+      item.isEnabled = true
+      item.state = current.contains(key) ? .on : .off
+    }
+    personalityNote.isHidden = (p["active"] as? Bool) == true
   }
 
   // ---------- Q's server ----------
@@ -376,6 +433,8 @@ final class Shell: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigati
     guard let what = message.body as? String else { return }
     if what == "expand" && compact { apply(compact: false) }
     if what == "shrink" && !compact { rememberFrame(); apply(compact: true) }
+    if what == "personality-menu" { DispatchQueue.main.async { [weak self] in self?.popPersonality() } }
+    if what.hasPrefix("personality:") { showPersonality(String(what.dropFirst(12))) }
     if what.hasPrefix("state:") {
       statusLine.title = "Q: " + what.dropFirst(6)
       // The page lost a server this app wasn't running (someone else's, now stopped): start our own.

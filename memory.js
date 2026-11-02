@@ -7,7 +7,7 @@ export const MAX_MEMORIES = 20;
 export const MAX_MEMORY_CHARS = 140;
 
 // Words that may come before the command: "Q, …", "hey Q, …", "okay, …".
-const LEAD = /^(?:(?:hey|yo|ok(?:ay)?|so|and|also|oh)\s*,?\s+)*(?:q\s*[,.]?\s+)?(?:please\s+)?/i;
+export const LEAD = /^(?:(?:hey|yo|ok(?:ay)?|so|and|also|oh)\s*,?\s+)*(?:q\s*[,.]?\s+)?(?:please\s+)?/i;
 // "remember when/what/how …" asks about the past; it is not a request to keep something.
 const NOT_A_FACT = /^(?:when|what|how|who|where|why|if|whether|me|you|us|this conversation|to\b)/i;
 
