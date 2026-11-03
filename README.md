@@ -93,6 +93,7 @@ speech/q-speak.swift  speech helper source (compiled to bin/q-speak, which is no
 Start Q.command    double-click launcher (opens Q's window; without it, runs npm start and opens the browser)
 shell/             Q's window: Swift source, Info.plist, icon generators and build script for bin/Q.app
 history.js         saved conversations: one SQLite file in ~/Library/Application Support/Q (npm test covers it)
+language.js        the language filter every reply passes through (word list encoded)
 personality.js     personality settings and the spoken commands that change them
 memory.js          the "remember" matcher, read-backs and what Q is shown of its memories
 public/mark.js     the Split-Core mark's shape, shared by the orb, the page and the icons (preview: /mark.html)

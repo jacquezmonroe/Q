@@ -7,7 +7,7 @@ import { SCHEMA, MAX_RUNS, MIN_FOR_P90, IDLE_MS, kindOf, sameWords, summarize, b
 
 // What this page needs from the server (server.js API_LEVEL). A server started
 // before an update keeps serving new pages until it is restarted.
-const NEEDS_API = 10;
+const NEEDS_API = 11;
 
 const $ = (sel) => document.querySelector(sel);
 const els = {
@@ -724,8 +724,8 @@ function renderPersonality(p) {
   if (!p) return;
   const mode = p.mode.charAt(0).toUpperCase() + p.mode.slice(1);
   els.personaChip.hidden = false;
-  els.personaChip.textContent = `${mode} · ${LEVEL_NAMES[p.level]} · Mouth ${p.watchYourMouth ? 'on' : 'off'}${p.active ? '' : ' · not active yet'}`;
-  els.personaChip.title = p.problem || (p.active ? 'Q’s personality settings' : 'Saved. These change how Q talks once the new personality is built.');
+  els.personaChip.textContent = `Mouth ${p.watchYourMouth ? 'on' : 'off'} · ${mode} · ${LEVEL_NAMES[p.level]}${p.active ? '' : ' (not active yet)'}`;
+  els.personaChip.title = p.problem || (p.active ? 'Q’s personality settings' : 'WATCHYAMOUTH on removes curse words from Q’s replies. Turning it off doesn’t make Q curse yet. That, Mode and CUTTIN’ UP arrive with the new personality.');
   els.personaChip.disabled = !shell; // only Q's window has the menu
   shell?.postMessage(`personality:${JSON.stringify(p)}`);
 }
@@ -1053,6 +1053,7 @@ function recordTurn(t) {
     firstChunk: t.firstChunk ?? null,
     mic: t.mic ?? null,
     armMs: t.armMs ?? null,
+    filtered: st.filtered ?? null,
     micHeld: t.micHeld ?? null,
     startsLoud: t.level ? t.level.startsLoud : null,
     pings: st.pingsSinceLastTurn ?? null,

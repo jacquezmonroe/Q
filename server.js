@@ -14,6 +14,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createEchoFilter } from './echo.js';
 import { openHistory } from './history.js';
+import { languagePolicy, cleanText, createLanguageFilter } from './language.js';
 import { parseCommand, commandReply, cleanSettings, loadSettings, saveSettings, ACTIVE as PERSONALITY_ACTIVE } from './personality.js';
 import { parseRemember, readBack, memoryBlock, createSuggestionFilter, offerable, answerTo, MAX_MEMORIES, MAX_MEMORY_CHARS } from './memory.js';
 
@@ -58,7 +59,7 @@ const DEFAULTS = {
 const CONFIG = await loadConfig();
 // Raised whenever the page starts needing something new from the server, so a
 // page served by a server that hasn't been restarted can say so.
-const API_LEVEL = 10;
+const API_LEVEL = 11;
 const VERSION = await readFile(path.join(ROOT, 'package.json'), 'utf8').then((t) => JSON.parse(t).version).catch(() => null);
 let stopping = false;
 
@@ -641,7 +642,8 @@ function answerSuggestion(conv, accept) {
 }
 
 // A fixed reply instead of the model's (remembering, answering a suggestion).
-function fixedTurn(req, res, send, conv, asked, reply, memory, label) {
+function fixedTurn(req, res, send, conv, asked, spoken, memory, label) {
+  const reply = cleanText(spoken, languagePolicy(personality.settings)).text; // read-backs repeat his words
   send({ type: 'token', text: reply });
   if (memory) send({ type: 'memory', memory: { id: memory.id, text: memory.text } });
   send({ type: 'done', stats: { memoryCommand: true, label } });
@@ -681,11 +683,7 @@ function rememberTurn(req, res, send, conv, asked, fact) {
     else if (r.error === 'too-long') reply = `That's a bit long for me to keep. Try it in under ${MAX_MEMORY_CHARS} characters.`;
     else reply = 'I couldn’t save that one.';
   }
-  send({ type: 'token', text: reply });
-  if (memory) send({ type: 'memory', memory: { id: memory.id, text: memory.text } });
-  send({ type: 'done', stats: { memoryCommand: true } });
-  if (fromOwnPage(req)) { try { saved.record(conv, asked, reply); } catch (err) { console.warn('[q] could not save the turn:', err.message); } }
-  res.end();
+  fixedTurn(req, res, send, conv, asked, reply, memory);
 }
 
 // Ollama reuses its work on a prompt only up to the first token that differs
@@ -790,6 +788,7 @@ async function streamChatInner(req, res) {
   const started = performance.now();
   let firstTokenMs = null;
   const echo = createEchoFilter(); // drops a timestamp the model copies back at the start
+  const language = createLanguageFilter(languagePolicy(personality.settings)); // nothing is shown, spoken or saved before this
   const tags = createSuggestionFilter(); // holds back a closing "want me to remember that?" until it's clear there's something to offer
   let said = ''; // the reply as the page received it, kept only so keep-warm can replay this turn
   try {
@@ -820,21 +819,21 @@ async function streamChatInner(req, res) {
         const text = msg.message?.content || '';
         if (text) {
           if (firstTokenMs == null) firstTokenMs = performance.now() - started;
-          const out = tags.push(echo.push(text));
+          const out = language.push(tags.push(echo.push(text)));
           if (out) { said += out; send({ type: 'token', text: out }); }
         }
         if (msg.done) {
-          const held = tags.push(echo.end()) + tags.end();
+          const held = language.push(tags.push(echo.end()) + tags.end()) + language.end();
           if (held) { said += held; send({ type: 'token', text: held }); }
           // The closing "want me to remember that?" is only heard if there's something to offer.
           const ask = tags.question();
           const offer = ask && !bench ? suggestionFor(req, body.conv, valid) : null;
           if (offer) {
-            const text = `${said && !/\s$/.test(said) ? ' ' : ''}${ask}`;
+            const text = `${said && !/\s$/.test(said) ? ' ' : ''}${cleanText(ask, languagePolicy(personality.settings)).text}`;
             said += text;
             send({ type: 'token', text });
             pendingSuggestion.set(body.conv, { said: offer.said, fact: offer.fact, at: Date.now() });
-            send({ type: 'suggestion', text: offer.said });
+            send({ type: 'suggestion', text: cleanText(offer.said, languagePolicy(personality.settings)).text });
           }
           lastModelUse = Date.now();
           if (!bench) {
@@ -867,6 +866,7 @@ async function streamChatInner(req, res) {
               warmupWaitMs,
               idleMs,
               pingsSinceLastTurn,
+              filtered: language.hits(),
               promptTokens: msg.prompt_eval_count || 0,
               promptMs: (msg.prompt_eval_duration || 0) / 1e6,
               evalTokens: msg.eval_count || 0,
@@ -1143,6 +1143,15 @@ const server = http.createServer(async (req, res) => {
       return json(res, 200, await whisperRequest(CONFIG.whisperComparePort, await readBody(req, 25_000_000)));
     }
     if (req.method === 'POST' && pathname === '/api/chat') return await streamChat(req, res);
+    // Cultural language (D-049): only Q's own window sends this header, after its
+    // confirmation dialog. The page, the general route and voice can't change it.
+    if (pathname === '/api/personality/cultural-language') {
+      if (!fromOwnPage(req) || req.headers['x-q-window'] !== '1' || req.method !== 'POST') return json(res, 403, { error: 'this can only be changed from Q’s own window' });
+      const body = JSON.parse((await readBody(req, 1000)).toString('utf8') || '{}');
+      personality.settings = { ...personality.settings, culturalLanguage: body.on === true };
+      saveSettings(personalityFile, personality.settings);
+      return json(res, 200, personalityState());
+    }
     if (pathname === '/api/personality') {
       if (!fromOwnPage(req)) return json(res, 403, { error: 'settings are only available to Q’s own page' });
       if (req.method === 'POST') changePersonality(JSON.parse((await readBody(req, 10_000)).toString('utf8') || '{}'));

@@ -183,8 +183,8 @@ In progress. Conversations are saved since D-037 and memories since D-042. Recal
 
 - [x] Phase 0: repo check, decisions logged (D-044 to D-051), baseline with Low Power Mode off, sources read. Jacquez accepted the existing voice baseline.
 - [x] Phase 1: settings, Personality menu, spoken commands, chip (confirmed by Jacquez 2026-11-02; by typing, real voice still to try).
-- [ ] Phase 2: output filter, on the server, including the Cultural language toggle.
-- [ ] Phase 3: persona 2.1. Must keep the memory lines, the sharper first-sentence rule, the closing honesty check and the honesty examples. Jacquez edits the example lines.
+- [x] Phase 2: output filter on the server, including the Cultural language toggle (2026-11-02; the toggle's dialog not yet clicked).
+- [ ] Phase 3: persona 2.1, including telling Q when cursing is allowed (WATCHYAMOUTH off only filters today, it doesn't make Q curse). Must keep the memory lines, the sharper first-sentence rule, the closing honesty check and the honesty examples. Jacquez edits the example lines.
 - [ ] Phase 4: auto mode and serious-moment detection.
 - [ ] Phase 5: culture cards and Learning Moments.
 - [ ] Phase 6: full test run and report.

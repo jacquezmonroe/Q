@@ -16,7 +16,7 @@ export const IDLE_MS = 180_000;
 const NUMBERS = [
   'at', 'total', 'stt', 'firstToken', 'firstSentence', 'voiceSynth',
   'promptMs', 'promptTokens', 'loadMs', 'warmupWaitMs', 'evalTokens', 'tokPerSec',
-  'captureMs', 'levelDb', 'loudMs', 'turnIndex', 'idleMs', 'pings', 'sttAltMs', 'armMs',
+  'captureMs', 'levelDb', 'loudMs', 'turnIndex', 'idleMs', 'pings', 'sttAltMs', 'armMs', 'filtered',
 ];
 const ENUMS = {
   kind: ['warm', 'idle', 'cold'],

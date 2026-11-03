@@ -2,8 +2,9 @@
 // Q's window and any browser, and the spoken commands that change it. Commands
 // are matched in plain code, never by the model, and must be the whole message.
 //
-// These settings don't change how Q talks yet: the filter comes in Phase 2,
-// the persona in Phase 3. ACTIVE says so, so nothing claims otherwise.
+// WATCHYAMOUTH and Work's no-cursing rule are enforced by language.js. The rest
+// doesn't change how Q talks until the persona arrives in Phase 3. ACTIVE says
+// so, so nothing claims otherwise.
 
 import { readFileSync, writeFileSync, renameSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
@@ -12,7 +13,8 @@ import { LEAD } from './memory.js';
 export const ACTIVE = false;
 export const MODES = ['auto', 'casual', 'work'];
 export const LEVELS = ['chill', 'playful', 'wildin'];
-export const DEFAULTS = { mode: 'auto', level: 'playful', watchYourMouth: true, learningMoments: true };
+// culturalLanguage is set only through its own route from Q's window (D-049), never here or by voice.
+export const DEFAULTS = { mode: 'auto', level: 'playful', watchYourMouth: true, learningMoments: true, culturalLanguage: false };
 
 // Keeps only known settings with allowed values; anything else is ignored.
 export function cleanSettings(raw, base = DEFAULTS) {
@@ -33,7 +35,7 @@ export function loadSettings(file) {
   try {
     const raw = JSON.parse(text);
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('not a settings object');
-    return { settings: cleanSettings(raw), problem: null };
+    return { settings: { ...cleanSettings(raw), culturalLanguage: raw.culturalLanguage === true }, problem: null };
   } catch {
     return { settings: { ...DEFAULTS }, problem: 'the settings file was damaged, so Q is using the defaults' };
   }
@@ -67,4 +69,8 @@ export function parseCommand(text) {
 }
 
 // What Q says back. While the settings have no effect, it says that too.
-export const commandReply = (label) => `${label}.${ACTIVE ? '' : ' Saved, but it won\'t change how I talk until my new personality is in.'}`;
+export function commandReply(label) {
+  if (ACTIVE || label.startsWith('WATCHYAMOUTH')) return `${label}.`; // the filter makes this one real already
+  if (label === 'Work mode') return 'Work mode. No cursing now. The rest won\'t change until my new personality is in.';
+  return `${label}. Saved, but it won't change how I talk until my new personality is in.`;
+}

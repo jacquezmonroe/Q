@@ -21,7 +21,9 @@ for (const [said, change] of Object.entries(yes)) check(`"${said}"`, same(parseC
 const no = ["What's work mode?", 'Work mode?', 'I was in work mode all day', 'My friend said watch your mouth to me', 'Is cuttin up playful good?', 'casual', 'serious', 'Get serious about this bug', 'Remember that I like work mode', '', null, 5];
 for (const said of no) check(`not a command: ${JSON.stringify(said)}`, parseCommand(said) === null, JSON.stringify(parseCommand(said)));
 check('there is no spoken way to change anything else', Object.values(yes).every((c) => Object.keys(c).every((k) => ['mode', 'level', 'watchYourMouth'].includes(k))));
-check('while settings have no effect, the read-back says so', ACTIVE === false && /won't change how I talk/.test(commandReply('Work mode')));
+check('while settings have no effect, the read-back says so', ACTIVE === false && /won't change how I talk/.test(commandReply('Cuttin\' Up on chill')));
+check('WATCHYAMOUTH is real now, so its read-back has no caveat', commandReply('WATCHYAMOUTH on') === 'WATCHYAMOUTH on.');
+check('Cultural language can\'t be set by a command or the general route', parseCommand('cultural language on') === null && cleanSettings({ culturalLanguage: true }).culturalLanguage === false);
 
 console.log('settings');
 check('junk is ignored, known values kept', same(cleanSettings({ mode: 'work', level: 'loud', watchYourMouth: 'no', culturalLanguage: true, x: 1 }), { ...DEFAULTS, mode: 'work' }));

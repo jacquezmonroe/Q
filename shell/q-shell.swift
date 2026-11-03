@@ -219,7 +219,15 @@ final class Shell: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigati
     group("CUTTIN' UP", [("Chill", "level", "'chill'"), ("Playful", "level", "'playful'"), ("Wildin'", "level", "'wildin'")])
     group("WATCHYAMOUTH", [("On", "watchYourMouth", "true"), ("Off", "watchYourMouth", "false")])
     group("Cultural Learning Moments", [("On", "learningMoments", "true"), ("Off", "learningMoments", "false")])
-    personalityNote = sub.addItem(withTitle: "Not active yet", action: nil, keyEquivalent: "")
+    sub.addItem(NSMenuItem.sectionHeader(title: "Cultural language"))
+    for (title, on) in [("Off", false), ("On…", true)] {
+      let item = sub.addItem(withTitle: title, action: #selector(chooseCultural(_:)), keyEquivalent: "")
+      item.target = self
+      item.isEnabled = false
+      item.representedObject = on
+      personalityItems["culturalLanguage=\(on)"] = item
+    }
+    personalityNote = sub.addItem(withTitle: "Mode, CUTTIN' UP and Cultural language not fully active yet", action: nil, keyEquivalent: "")
     personalityNote.isEnabled = false
     personalitySub = sub
     let parent = NSMenuItem(title: "Personality", action: nil, keyEquivalent: "")
@@ -240,10 +248,37 @@ final class Shell: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigati
     web.evaluateJavaScript("window.qSetPersonality && window.qSetPersonality(\(change))")
   }
 
+  // Cultural language (D-049) changes only here, with a confirmation to turn it
+  // on. It goes straight to the server; nothing else may send this request.
+  @objc func chooseCultural(_ sender: NSMenuItem) {
+    let on = sender.representedObject as? Bool == true
+    if on {
+      let alert = NSAlert()
+      alert.messageText = "Turn on Cultural language?"
+      alert.informativeText = "This lets the colloquial n-word through the filter, in Casual mode with WATCHYAMOUTH off. Q speaks out loud, so anyone nearby would hear it. The hard-R form stays blocked. Code can keep it out, but it can't guarantee how well Q uses it. Q won't use it until the new personality is built."
+      alert.addButton(withTitle: "Turn On")
+      alert.addButton(withTitle: "Cancel")
+      NSApp.activate(ignoringOtherApps: true)
+      guard alert.runModal() == .alertFirstButtonReturn else { return }
+    }
+    var request = URLRequest(url: pageURL.appendingPathComponent("api/personality/cultural-language"))
+    request.httpMethod = "POST"
+    request.setValue("application/json", forHTTPHeaderField: "content-type")
+    request.setValue("1", forHTTPHeaderField: "x-q-window")
+    request.httpBody = Data("{\"on\":\(on)}".utf8)
+    URLSession.shared.dataTask(with: request) { [weak self] _, _, error in
+      DispatchQueue.main.async {
+        if let error { log("cultural language not changed: \(error.localizedDescription)") }
+        self?.web.evaluateJavaScript("window.qSetPersonality && window.qSetPersonality({})")
+      }
+    }.resume()
+  }
+
   func showPersonality(_ json: String) {
     guard let data = json.data(using: .utf8), let p = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return }
     let current = ["mode=\(p["mode"].map { "'\($0)'" } ?? "")", "level=\(p["level"].map { "'\($0)'" } ?? "")",
-                   "watchYourMouth=\((p["watchYourMouth"] as? Bool) == true)", "learningMoments=\((p["learningMoments"] as? Bool) == true)"]
+                   "watchYourMouth=\((p["watchYourMouth"] as? Bool) == true)", "learningMoments=\((p["learningMoments"] as? Bool) == true)",
+                   "culturalLanguage=\((p["culturalLanguage"] as? Bool) == true)"]
     for (key, item) in personalityItems {
       item.isEnabled = true
       item.state = current.contains(key) ? .on : .off
